@@ -28,16 +28,16 @@ train_linear_models <- function(training_data, onlyPositive, includeIntercept, h
     
     
     #Extract full data frame to use for origins
-    origins <- training_data %>% filter(horizon == h)
+    origins <- training_data %>% filter(is_origin == 1)
     
     #Filter horizon
     train_data <- training_data %>% filter(horizon == h)
     
     #For Swedish Data correct size
-    #if(unique(origins$horizon == 24)) {
+    if(unique(origins$horizon == 24)) {
     origins <- origins[-length(origins$time),]
     train_data <- train_data[-1,]
-    #}  
+    }
     
     train_data[,"origins"] <- origins[,"wind_power"]
     

@@ -9,7 +9,7 @@
 #' @return A list of a list of dataframes containing the EMOS parameters for each weather variable and each forecast horizon
 #' @export
 
-emos_weather_variables <- function(original_ensembles, weather_params, norm_l, tnorm_l, horizons, daysToTrain = 30, startDate = NULL) {
+emos_weather_variables <- function(original_ensembles, weather_params, norm_l, tnorm_l, gamma_l, horizons, daysToTrain = 30, startDate = NULL) {
   require(dplyr)
   require(scoringRules)
   
@@ -24,6 +24,8 @@ emos_weather_variables <- function(original_ensembles, weather_params, norm_l, t
       model_type <- "normal"
     } else if(w %in% tnorm_l) {
       model_type <- "truncnormal"
+    } else if(w %in% gamma_l) {
+      model_type <- "gamma"
     }
     
     #Select only one weather variable
@@ -88,7 +90,12 @@ emos_weather_variables <- function(original_ensembles, weather_params, norm_l, t
                              ensVar = subset_train$vars,
                              obs = subset_train$obs,
                              method = "BFGS",
-                             control = list(maxit = 1000))
+                             control = list(maxit = 10000))
+          if(optim_out$convergence != 0) {
+            message("numerical optimisation did not converge")
+            print(i)
+            print("normal")
+          }
         } else if(model_type == "truncnormal") {
           optim_out <- optim(par = c(1,1,1,1),
                              fn = objective_function_tnorm,
@@ -97,7 +104,22 @@ emos_weather_variables <- function(original_ensembles, weather_params, norm_l, t
                              ensVar = subset_train$vars,
                              obs = subset_train$obs,
                              method = "BFGS",
-                             control = list(maxit = 1000))
+                             control = list(maxit = 10000))
+          if(optim_out$convergence != 0) {
+            message("numerical optimisation did not converge")
+            print(i)
+            print("tnorm")
+          }
+        } else if(model_type == "gamma") {
+          optim_out <- optim(par = c(1,1,1,1),
+                             fn = objective_function_gamma,
+                             ensMean = subset_train$m,
+                             ensVar = subset_train$vars,
+                             obs = subset_train$obs,
+                             lower=c(0.001, 0.001, 0.001, 0.001),
+                             upper = c(999,999,999,999),
+                             method = "L-BFGS-B",
+                             control = list(maxit = 10000))
         }
         result_df[i-daysToTrain,r_names] <- optim_out$par
       }
@@ -121,7 +143,7 @@ emos_weather_variables <- function(original_ensembles, weather_params, norm_l, t
 #' @return A list of dataframes containing the calibrated forecasts for each forecast horizon
 #' @export
 
-emos_weather_forecast <- function(emos_params, weather_ensembles, weather_params, norm_l, tnorm_l, horizons, daysToTrain = 30, startDate = NULL) {
+emos_weather_forecast <- function(emos_params, weather_ensembles, weather_params, norm_l, tnorm_l, gamma_l, horizons, daysToTrain = 30, startDate = NULL) {
   require(crch)
   require(scoringRules)
   #Create ensemble member names
@@ -174,7 +196,12 @@ emos_weather_forecast <- function(emos_params, weather_ensembles, weather_params
       d <- emos_df$d
       
       mean_matrix <- cbind(1,ensMeans)
-      var_matrix <- cbind(1,ensVars)
+      
+      if(w %in% gamma_l) {
+        var_matrix <- cbind(1, ensMeans)
+      } else {
+        var_matrix <- cbind(1,ensVars)
+      }
       
       mp_matrix <- rbind(a,b)
       vp_matrix <- rbind(c,d)
@@ -212,7 +239,16 @@ emos_weather_forecast <- function(emos_params, weather_ensembles, weather_params
           }
           res_df[i,ensMemberNames] <- rtnorm(51, mean = this_mu, sd = f_params$sigma[i], left = 0, right = Inf)
         }
+      } else if(w %in% gamma_l) {
+        for (i in 1:length(res_df$time)) {
+          this_mu <- f_params$mu[i]
+          this_var <- f_params$sigma[i]^2
+          s_shape <- this_mu^2 / this_var
+          s_scale <- this_var / this_mu
+          res_df[i,ensMemberNames] <- rgamma(51, shape = s_shape, scale = s_scale)
+        }
       }
+      
       pred.list[[w]][[hr]] <- res_df
     }
   }
@@ -231,7 +267,7 @@ emos_weather_forecast <- function(emos_params, weather_ensembles, weather_params
 #' @return A list of dataframes containing the distribution parameters for each forecast horizon
 #' @export
 
-emos_weather_dist_parameters <- function(emos_params, weather_ensembles, weather_params, norm_l, tnorm_l, horizons, daysToTrain = 30, startDate = NULL) {
+emos_weather_dist_parameters <- function(emos_params, weather_ensembles, weather_params, norm_l, tnorm_l, gamma_l, horizons, daysToTrain = 30, startDate = NULL) {
   require(crch)
   #Create ensemble member names
   ensMemberNames <- 0
@@ -283,7 +319,13 @@ emos_weather_dist_parameters <- function(emos_params, weather_ensembles, weather
       d <- emos_df$d
       
       mean_matrix <- cbind(1,ensMeans)
-      var_matrix <- cbind(1,ensVars)
+      
+      if(w %in% gamma_l) {
+        var_matrix <- cbind(1, ensMeans)
+      } else {
+        var_matrix <- cbind(1,ensVars)
+      }
+     
       
       mp_matrix <- rbind(a,b)
       vp_matrix <- rbind(c,d)
@@ -302,7 +344,22 @@ emos_weather_dist_parameters <- function(emos_params, weather_ensembles, weather
         
       }
       
-      f_params <- data.frame(time = only.times, obs = only.obs, mu = mu, sigma = sigma)
+      
+      
+      if(w %in% gamma_l) {
+        g_shape <- NULL
+        g_scale <- NULL
+        
+        for (i in 1:length(mu)) {
+          g_shape[i] <- mu[i]^2 / sigma[i]^2
+          g_scale[i] <- sigma[i]^2 / mu[i]
+        }
+        
+        f_params <- data.frame(time = only.times, obs = only.obs, shape = g_shape, scale = g_scale)
+        
+      } else {
+        f_params <- data.frame(time = only.times, obs = only.obs, mu = mu, sigma = sigma)
+      }
       
       param.list[[w]][[hr]] <- f_params
     }
@@ -350,6 +407,29 @@ objective_function_norm <- function(par, ensMean, ensVar, obs) {
   } else {
     s <- sqrt(ssq)
     return(sum(crps_norm(y = obs, location = m, scale = s)))
+  }
+}
+
+
+##Objective function for the minimum CRPS estimation of EMOS parameters when using a gamma distribution
+#' @param par The EMOS parameters to be optimised
+#' @param ensMean The Ensemble Mean
+#' @param ensVar The Ensemble Variance
+#' @param obs The observations
+#' @return The CRPS based on a gamma distribution
+#' @export
+
+
+objective_function_gamma <- function(par, ensMean, ensVar, obs) {
+  m <- cbind(1, ensMean) %*% par[1:2]
+  ssq <- cbind(1, ensMean) %*% par[3:4]
+  if(any(ssq < 0)) {
+    return(999999)
+  } else {
+    s <- sqrt(ssq)
+    s_shape <- m^2 / ssq
+    s_scale <- ssq / m
+    return(sum(crps_gamma(y = obs, shape = s_shape, scale = s_scale)))
   }
 }
 

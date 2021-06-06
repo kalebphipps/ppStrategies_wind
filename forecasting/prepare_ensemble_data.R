@@ -81,6 +81,11 @@ prepare_ensemble_data <- function(wp_name, ensemble_data, weather_params, file_p
       train_data[,w] <- ensemble_data[[w]][,ens_name]
     }
     
+    train_data[,"speed3"] <- (ensemble_data[["speed"]][,ens_name])^3
+    
+    quantile90 <- as.numeric(quantile(unlist(ensemble_data[["speed"]][,ens_name]), probs = c(.9)))
+    train_data[,"critical"] <- ifelse(ensemble_data[["speed"]][,ens_name]>quantile90, 1, 0)
+    
     f.list[[j]] <- train_data
   }
   return(f.list)

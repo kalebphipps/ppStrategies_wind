@@ -1,6 +1,6 @@
 ##Function that generates an ensemble of predictions based on ensemble weather data
 #' @param prediction_data The dataframe containing the ensemble data to generate predictions
-#' @param linear_models A list of the trained linear models
+#' @param rf_models A list of the trained linear models
 #' @param onlyPositive Boolean indicating whether only positive regression coefficients should be allowed
 #' @param horizons The forecast horizons for which predictions should be generated
 #' @param reg_params The regression parameters (needed only if a positive model is being used)
@@ -8,7 +8,7 @@
 #' @export
 
 
-predict_ensemble_model <- function(prediction_data, linear_models, onlyPositive, horizons,reg_params=NULL) {
+predict_rf_ensembles <- function(prediction_data, rf_models, onlyPositive, horizons,reg_params=NULL) {
   require(dplyr)
   
   #List to be returned
@@ -70,29 +70,29 @@ predict_ensemble_model <- function(prediction_data, linear_models, onlyPositive,
       
       if(!onlyPositive) {
         #Case with postive and negative coefficients in the model
-        predictions <- predict(linear_models[[hr]], predict_df)
-       
+        predictions <- predict(rf_models[[hr]], predict_df)
+        
         
         if(scaledData) {
           predictions <- ifelse(predictions <= 0, 0, predictions)
         }else if(!scaledData) {
           predictions <- ifelse(predictions <= 0, 0.01, predictions)
         }
-      
-       
+        
+        
         saved_df[,ens_name] <- as.numeric(predictions)
         
       }else if(onlyPositive) {
         #Case with only positive coefficients in the model
         A <- as.matrix(predict_df[,reg_params])
-        coefs <- coef(linear_models[[hr]])
+        coefs <- coef(rf_models[[hr]])
         predictions <- coefs%*%t(A)
         saved_df[,ens_name] <- as.numeric(predictions)
       }
     }
     
     list.p[[hr]] <- saved_df
-  
+    
   }
   return(list.p)
 }
@@ -100,7 +100,7 @@ predict_ensemble_model <- function(prediction_data, linear_models, onlyPositive,
 
 ##Function that generates a single prediction since only dummy data is used
 #' @param prediction_data The dataframe containing the data to generate predictions
-#' @param linear_models A list of the trained linear models
+#' @param rf_models A list of the trained linear models
 #' @param onlyPositive Boolean indicating whether only positive regression coefficients should be allowed
 #' @param includeIntercept Boolean indicating whether the intercept should be included or not. NOTE: It
 #'                         is currently impossible to include the intercept when training a strictly positive linear model
@@ -110,7 +110,7 @@ predict_ensemble_model <- function(prediction_data, linear_models, onlyPositive,
 #' @export
 
 
-predict_single_model <- function(prediction_data, linear_models, onlyPositive, includeIntercept, horizons, reg_params) {
+predict_single_model <- function(prediction_data, rf_models, onlyPositive, includeIntercept, horizons, reg_params) {
   require(dplyr)
   
   #List to be returned
@@ -155,7 +155,7 @@ predict_single_model <- function(prediction_data, linear_models, onlyPositive, i
     
     if(!onlyPositive) {
       #Case where negative coefficients are allowed
-      predictions <- predict(linear_models[[hr]], ref_df)
+      predictions <- predict(rf_models[[hr]], ref_df)
       
       if(scaledData) {
         predictions <- ifelse(predictions <= 0, 0, predictions)
@@ -168,7 +168,7 @@ predict_single_model <- function(prediction_data, linear_models, onlyPositive, i
     } else if(onlyPositive) {
       #Case where only positive coefficients are allowed
       A <- as.matrix(ref_data[,reg_params])
-      coefs <- coef(linear_models[[hr]])
+      coefs <- coef(rf_models[[hr]])
       predictions <- coefs%*%t(A)
       saved_df[,"prediction"] <- as.numeric(predictions)
     }

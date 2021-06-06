@@ -60,13 +60,15 @@ emos_power_ensembles <- function(power_ensembles, horizons, daysToTrain = 30, st
       
       subset_train <- train_df[tw_start:tw_end,]
       optim_out <- optim(par = c(1,1,1,1),
-                         fn = objective_function_tnorm,
-                         gr = gradient_wrapper_tnorm,
+                         fn = objective_function_gamma,
+                         #gr = gradient_wrapper_tnorm,
                          ensMean = subset_train$m,
                          ensVar = subset_train$vars,
                          obs = subset_train$obs,
-                         method = "BFGS",
-                         control = list(maxit = 1000))
+                         lower=c(0.001, 0.001, 0.001, 0.001),
+                         upper = c(999,999,999,999),
+                         method = "L-BFGS-B",
+                         control = list(maxit = 10000))
       result_df[i-daysToTrain,r_names] <- optim_out$par
     }
     param.list[[hr]] <- result_df
@@ -131,7 +133,7 @@ emos_power_forecast <- function(emos_params, power_ensembles, horizons, daysToTr
     d <- emos_df$d
     
     mean_matrix <- cbind(1,ensMeans)
-    var_matrix <- cbind(1,ensVars)
+    var_matrix <- cbind(1,ensMeans)
     
     mp_matrix <- rbind(a,b)
     vp_matrix <- rbind(c,d)
@@ -142,13 +144,13 @@ emos_power_forecast <- function(emos_params, power_ensembles, horizons, daysToTr
     for (i in 1:length(a)) {
       mu[i] <- mean_matrix[i,] %*% mp_matrix[,i]
       var_v <- var_matrix[i,] %*% vp_matrix[,i]
-      if(var_v <= 0 ){
-        sigma[i] <- 0.001
-      } else {
-        sigma[i] <- sqrt(var_v)
+      if(var_v < 0) {
+        print(i)
+        print(var_v)
       }
+      sigma[i] <- sqrt(var_v)
     }
-    
+   
     f_params <- data.frame(time = only.times, mu = mu, sigma = sigma)
     
     res_df <- as.data.frame(matrix(0, ncol = 53, nrow = length(only.times)))
@@ -159,10 +161,9 @@ emos_power_forecast <- function(emos_params, power_ensembles, horizons, daysToTr
     
     for (i in 1:length(res_df$time)) {
       this_mu <- f_params$mu[i]
-      if(this_mu < 0) {
-        this_mu <- 0
-      }
-      res_df[i,ensMemberNames] <- rtnorm(51, mean = this_mu, sd = f_params$sigma[i], left = 0, right = Inf)
+      this_shape <- this_mu^2 / f_params$sigma[i]^2
+      this_scale <- f_params$sigma[i]^2 / this_mu
+      res_df[i,ensMemberNames] <- rgamma(51, shape = this_shape, scale= this_scale)
     }
     pred.list[[hr]] <- res_df
   }
@@ -227,25 +228,25 @@ emos_power_distribution <- function(emos_params, power_ensembles, horizons, days
     d <- emos_df$d
     
     mean_matrix <- cbind(1,ensMeans)
-    var_matrix <- cbind(1,ensVars)
+    var_matrix <- cbind(1,ensMeans)
     
     mp_matrix <- rbind(a,b)
     vp_matrix <- rbind(c,d)
     
     mu <- NULL
     sigma <- NULL
+    this_shape <- NULL
+    this_scale <- NULL
     
     for (i in 1:length(a)) {
       mu[i] <- mean_matrix[i,] %*% mp_matrix[,i]
       var_v <- var_matrix[i,] %*% vp_matrix[,i]
-      if(var_v <= 0 ){
-        sigma[i] <- 0.001
-      } else {
-        sigma[i] <- sqrt(var_v)
-      }
+
+      this_shape[i] <- mu[i]^2 / var_v
+      this_scale[i] <- var_v / mu[i]
     }
     
-    f_params <- data.frame(time = only.times, obs = only.obs, mu = mu, sigma = sigma)
+    f_params <- data.frame(time = only.times, obs = only.obs, shape = this_shape, scale = this_scale)
     
     pred.list[[hr]] <- f_params
   }
@@ -256,33 +257,25 @@ emos_power_distribution <- function(emos_params, power_ensembles, horizons, days
 
 
 
-##Objective function for the minimum CRPS estimation of EMOS parameters when using a truncated normal distribution
+##Objective function for the minimum CRPS estimation of EMOS parameters when using a gamma distribution
 #' @param par The EMOS parameters to be optimised
 #' @param ensMean The Ensemble Mean
 #' @param ensVar The Ensemble Variance
 #' @param obs The observations
-#' @return The CRPS based on a truncated normal distribution
+#' @return The CRPS based on a gamma distribution
 #' @export
 
 
-objective_function_tnorm <- function(par, ensMean, ensVar, obs) {
+objective_function_gamma <- function(par, ensMean, ensVar, obs) {
   m <- cbind(1, ensMean) %*% par[1:2]
-  ssq <- cbind(1, ensVar) %*% par[3:4]
+  ssq <- cbind(1, ensMean) %*% par[3:4]
+
   if(any(ssq < 0)) {
     return(999999)
   } else {
     s <- sqrt(ssq)
-    return(sum(crps_tnorm(y = obs, location = m, scale = s, lower = 0, upper = Inf)))
+    s_shape <- m^2 / ssq
+    s_scale <- ssq / m
+    return(sum(crps_gamma(y = obs, shape = s_shape, scale = s_scale)))
   }
-}
-
-gradient_wrapper_tnorm <- function(par, obs, ensMean, ensVar){
-  loc <- cbind(1, ensMean) %*% par[1:2]
-  sc <- sqrt(cbind(1, ensVar) %*% par[3:4])
-  dcrps_dtheta <- gradcrps_tnorm(y = obs, location = loc, scale = sc, lower = 0, upper = Inf) 
-  out1 <- dcrps_dtheta[,1] %*% cbind(1, ensMean)
-  out2 <- dcrps_dtheta[,2] %*% 
-    cbind(1/(2*sqrt(par[3]+par[4]*ensVar)), 
-          ensVar/(2*sqrt(par[3]+par[4]*ensVar)))
-  return(as.numeric(cbind(out1,out2)))
 }

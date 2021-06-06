@@ -36,6 +36,10 @@ prepare_training_data <- function(wp_name, obs_name, weather_params, file_path, 
     training_data[,w] <- obs_data[,w]
   }
   
+  training_data[,"speed3"] <- (obs_data[,"speed"])^3
+  quantile90 <- as.numeric(quantile(unlist(obs_data[,"speed"]), probs = c(.9)))
+  training_data[,"critical"] <- ifelse(obs_data[,"speed"]>quantile90, 1, 0)
+  
   #Add in the dummy variables
   the_year <- year(training_data$time)
   unique_year <- unique(the_year)

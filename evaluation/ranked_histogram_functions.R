@@ -160,19 +160,9 @@ weather_verification_rank_limits <- function(ranked_hist_list, weather_params, h
 #' @export
 
 
-pit <- function(mu, sigma, scale = NULL, shape = NULL,
-                distribution = c('normal', 'truncnormal', 'gamma0'),
+pit <- function(mu = NULL, sigma = NULL, scale = NULL, shape = NULL,
+                distribution = c('normal', 'truncnormal', 'gamma'),
                 observations) {
-  
-  if (length(observations) != length(mu)) {
-    
-    print('Error: The observations and mu parameters differ in length!')
-    
-  } else if (length(observations) != length(sigma)) {
-    
-    print('Error: The observations and sigma parameters differ in length!')
-    
-  }
   
   pit <- c()
   
@@ -194,7 +184,7 @@ pit <- function(mu, sigma, scale = NULL, shape = NULL,
       
     }
     
-  } else if (distribution == 'gamma0') {
+  } else if (distribution == 'gamma') {
     
     for (i in 1:length(observations)) {
       
@@ -212,11 +202,12 @@ pit <- function(mu, sigma, scale = NULL, shape = NULL,
 # This function generates a list of PIT histograms for calibrated power ensemble forecasts
 #' @param power_distribution_list A list containing the emos power distribution parameters and the original observations
 #' @param limits A list containing the limits for plotting the PIT
-#' @param horizons vector of different forecast horizons to be considered
+#' @param horizons A vector of different forecast horizons to be considered
+#' @param distrib A string to indicate whether a gamma or truncnormal distribution should be used
 #' @return A list of PIT histograms for each forecast horizon
 #' @export
 
-create_pit_histogram <- function(power_distribution_list, limits, horizons) {
+create_pit_histogram <- function(power_distribution_list, limits, horizons, distrib) {
   require(ggplot2)
   
   pit_list <- list()
@@ -224,8 +215,17 @@ create_pit_histogram <- function(power_distribution_list, limits, horizons) {
   for (h in horizons) {
     hr <- paste("h",h,sep = "")
     
-    pit_v <- pit(power_distribution_list[[hr]][,"mu"], power_distribution_list[[hr]][,"sigma"], 
-                 distribution = "truncnormal", observations = power_distribution_list[[hr]][,"obs"])
+    if(distrib == "truncnormal") {
+      pit_v <- pit(mu = power_distribution_list[[hr]][,"mu"], sigma = power_distribution_list[[hr]][,"sigma"], 
+                   distribution = "truncnormal", observations = power_distribution_list[[hr]][,"obs"])
+      
+    } else if(distrib == "gamma") {
+      pit_v <- pit(shape = power_distribution_list[[hr]][,"shape"], scale = power_distribution_list[[hr]][,"scale"], 
+                  distribution = "gamma", observations = power_distribution_list[[hr]][,"obs"])
+      
+    }
+    
+    
     
     min_wt <- min(pit_v)
     
@@ -255,7 +255,7 @@ create_pit_histogram <- function(power_distribution_list, limits, horizons) {
 #' @return A list of PIT histograms for each forecast horizon
 #' @export
 
-create_weather_pit_histogram <- function(weather_distribution_list, limits, weather_params, horizons, norm_l, tnorm_l) {
+create_weather_pit_histogram <- function(weather_distribution_list, limits, weather_params, horizons, norm_l, tnorm_l, gamma_l) {
   require(ggplot2)
   
   pit_list <- list()
@@ -268,11 +268,14 @@ create_weather_pit_histogram <- function(weather_distribution_list, limits, weat
       hr <- paste("h",h,sep = "")
       
       if(w %in% norm_l) {
-        pit_v <- pit(weather_distribution_list[[w]][[hr]][,"mu"], weather_distribution_list[[w]][[hr]][,"sigma"], 
+        pit_v <- pit(mu = weather_distribution_list[[w]][[hr]][,"mu"], sigma = weather_distribution_list[[w]][[hr]][,"sigma"], 
                      distribution = "normal", observations = weather_distribution_list[[w]][[hr]][,"obs"])
       } else if(w %in% tnorm_l) {
-        pit_v <- pit(weather_distribution_list[[w]][[hr]][,"mu"], weather_distribution_list[[w]][[hr]][,"sigma"], 
+        pit_v <- pit(mu = weather_distribution_list[[w]][[hr]][,"mu"], sigma = weather_distribution_list[[w]][[hr]][,"sigma"], 
                      distribution = "truncnormal", observations = weather_distribution_list[[w]][[hr]][,"obs"])
+      } else if(w %in% gamma_l) {
+        pit_v <- pit(shape = weather_distribution_list[[w]][[hr]][,"shape"], scale = weather_distribution_list[[w]][[hr]][,"scale"], 
+                     distribution = "gamma", observations = weather_distribution_list[[w]][[hr]][,"obs"])
       }
       
       min_wt <- min(pit_v)
